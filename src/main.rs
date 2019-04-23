@@ -4,6 +4,7 @@ use std::convert::TryFrom;
 use std::env;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::io;
 use std::process::exit;
 
 use hidapi::{HidApi, HidDevice};
@@ -85,13 +86,10 @@ fn send_led_map(device: &HidDevice, map: &[Color; RV_NUM_KEYS]) {
     }
 }
 
-fn build_map() -> Result<[Color; RV_NUM_KEYS], UserError> {
-    // Initialize all keys to OFF (0, 0, 0)
-    let mut map: [Color; RV_NUM_KEYS] = [Color { r: 0, g: 0, b: 0 }; RV_NUM_KEYS];
-
-    let mut args = env::args();
-    args.next(); // Skip exec path
-
+fn set_map<'a, I>(map: &mut [Color; RV_NUM_KEYS], mut args: I) -> Result<(), UserError>
+where
+    I: Iterator<Item = &'a str>,
+{
     while let Some(key) = args.next() {
         let key_code = ok_or_user_error!(
             util::parse_key_name(&key.to_uppercase().trim_start_matches("KEY_")),
@@ -139,13 +137,32 @@ fn build_map() -> Result<[Color; RV_NUM_KEYS], UserError> {
         }
     }
 
-    Ok(map)
+    Ok(())
 }
 
 fn run() -> Result<(), UserError> {
-    let map = build_map()?;
     let led_device = open_device()?;
-    send_led_map(&led_device, &map);
+
+    let mut map: [Color; RV_NUM_KEYS] = [Color { r: 0, g: 0, b: 0 }; RV_NUM_KEYS];
+
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args.is_empty() {
+        loop {
+            let mut buf = String::new();
+            io::stdin()
+                .read_line(&mut buf)
+                .expect("Error reading stdin");
+            if buf.is_empty() {
+                break;
+            }
+
+            set_map(&mut map, buf.split_whitespace())?;
+            send_led_map(&led_device, &map);
+        }
+    } else {
+        set_map(&mut map, args.iter().map(|s| s.as_ref()))?;
+        send_led_map(&led_device, &map);
+    }
 
     Ok(())
 }
