@@ -140,12 +140,18 @@ where
     while let Some(key) = args.next() {
         let color = parse_color(&mut args, &key)?;
         let normalized = key.to_uppercase();
-        let key_code = ok_or_user_error!(
-            util::parse_key_name(normalized.trim_start_matches("KEY_")),
-            "Invalid key code {}",
-            &key
-        );
-        map[key_code] = color;
+        if normalized == "ALL" {
+            for key in map.iter_mut() {
+                *key = color
+            }
+        } else {
+            let key_code = ok_or_user_error!(
+                util::parse_key_name(normalized.trim_start_matches("KEY_")),
+                "Invalid key code {}",
+                &key
+            );
+            map[key_code] = color;
+        }
     }
 
     Ok(())
