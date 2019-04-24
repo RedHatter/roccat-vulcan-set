@@ -7,7 +7,7 @@ use std::fmt::{Display, Formatter};
 use std::io;
 use std::process::exit;
 
-use hidapi::{HidApi, HidDevice};
+use hidapi::{HidApi, HidDevice, HidDeviceInfo};
 
 #[macro_use]
 mod util;
@@ -45,14 +45,24 @@ struct Color {
     b: u8,
 }
 
+#[cfg(not(target_os = "macos"))]
+fn match_device<'r>(device: &'r &HidDeviceInfo) -> bool {
+    device.interface_number == RV_LED_INTERFACE
+        && device.vendor_id == RV_VENDOR
+        && RV_PRODUCTS.contains(&device.product_id)
+}
+
+#[cfg(target_os = "macos")]
+fn match_device<'r>(device: &'r &HidDeviceInfo) -> bool {
+    device.path.as_c_str().to_str().unwrap().ends_with("3")
+        && device.vendor_id == RV_VENDOR
+        && RV_PRODUCTS.contains(&device.product_id)
+}
+
 fn open_device() -> Result<HidDevice, UserError> {
     let api = HidApi::new().expect("Error in HidApi");
     let led_device_info = ok_or_user_error!(
-        api.devices()
-            .into_iter()
-            .find(|o| o.interface_number == RV_LED_INTERFACE
-                && o.vendor_id == RV_VENDOR
-                && RV_PRODUCTS.contains(&o.product_id)),
+        api.devices().into_iter().find(match_device),
         "No LED device found"
     );
     println!("LED interface at USB path {:#?}", led_device_info.path);
