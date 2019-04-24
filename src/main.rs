@@ -65,6 +65,8 @@ fn open_device() -> Result<HidDevice, UserError> {
 fn send_led_map(device: &HidDevice, map: &[Color; RV_NUM_KEYS]) {
     let mut hwmap: [u8; 444] = [0; 444];
 
+    // Colors are in blocks of 12 keys (2 columns). Color parts are sorted by color e.g. the red
+    // values for all 12 keys are first then come the green values etc.
     for (i, color) in map.iter().enumerate() {
         let offset = ((i / 12) * 36) + (i % 12);
 
@@ -86,55 +88,64 @@ fn send_led_map(device: &HidDevice, map: &[Color; RV_NUM_KEYS]) {
     }
 }
 
+fn parse_color<'a, I>(mut args: I, key: &str) -> Result<Color, UserError>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let value = ok_or_user_error!(args.next(), "Color value missing for {}", key);
+
+    let without_prefix = value.trim_start_matches("0x").trim_start_matches("#");
+    if without_prefix.len() == 6 {
+        let hex = or_user_error!(
+            u32::from_str_radix(&without_prefix, 16),
+            "Invalid HEX color {} for {}",
+            &without_prefix,
+            key
+        );
+        Ok(Color {
+            r: u8::try_from((hex >> 16) & 0xff).unwrap(),
+            g: u8::try_from((hex >> 8) & 0xff).unwrap(),
+            b: u8::try_from(hex & 0xff).unwrap(),
+        })
+    } else {
+        let green = ok_or_user_error!(args.next(), "Green value missing for {}", key);
+        let blue = ok_or_user_error!(args.next(), "Blue value missing for {}", key);
+        Ok(Color {
+            r: or_user_error!(
+                value.parse::<u8>(),
+                "Invalid red value {} for {}",
+                &value,
+                key
+            ),
+            g: or_user_error!(
+                green.parse::<u8>(),
+                "Invalid green value {} for {}",
+                &green,
+                key
+            ),
+            b: or_user_error!(
+                blue.parse::<u8>(),
+                "Invalid blue value {} for {}",
+                &blue,
+                key
+            ),
+        })
+    }
+}
+
 fn set_map<'a, I>(map: &mut [Color; RV_NUM_KEYS], mut args: I) -> Result<(), UserError>
 where
     I: Iterator<Item = &'a str>,
 {
     while let Some(key) = args.next() {
+        let color = parse_color(&mut args, &key)?;
+        let normalized = key.to_uppercase();
         let key_code = ok_or_user_error!(
-            util::parse_key_name(&key.to_uppercase().trim_start_matches("KEY_")),
+            util::parse_key_name(normalized.trim_start_matches("KEY_")),
             "Invalid key code {}",
             &key
         );
-        let value = ok_or_user_error!(args.next(), "Color value missing for {}", &key);
-
-        let without_prefix = value.trim_start_matches("0x").trim_start_matches("#");
-        if without_prefix.len() == 6 {
-            let z = or_user_error!(
-                u32::from_str_radix(&without_prefix, 16),
-                "Invalid HEX color {} for {}",
-                &without_prefix,
-                &key
-            );
-            map[key_code] = Color {
-                r: u8::try_from((z >> 16) & 0xff).unwrap(),
-                g: u8::try_from((z >> 8) & 0xff).unwrap(),
-                b: u8::try_from(z & 0xff).unwrap(),
-            };
-        } else {
-            let green = ok_or_user_error!(args.next(), "Green value missing for {}", &key);
-            let blue = ok_or_user_error!(args.next(), "Blue value missing for {}", &key);
-            map[key_code] = Color {
-                r: or_user_error!(
-                    value.parse::<u8>(),
-                    "Invalid red value {} for {}",
-                    &value,
-                    &key
-                ),
-                g: or_user_error!(
-                    green.parse::<u8>(),
-                    "Invalid green value {} for {}",
-                    &green,
-                    &key
-                ),
-                b: or_user_error!(
-                    blue.parse::<u8>(),
-                    "Invalid blue value {} for {}",
-                    &blue,
-                    &key
-                ),
-            };
-        }
+        map[key_code] = color;
     }
 
     Ok(())
